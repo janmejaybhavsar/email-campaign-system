@@ -19,6 +19,7 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
 console.log('🚀 Starting Professional Cold Email System...');
 
@@ -231,7 +232,9 @@ app.get('/health', (req, res) => {
     status: 'healthy',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    emailServiceConnected: !!emailTransporter
+    emailServiceConnected: !!emailTransporter,
+    environment: process.env.NODE_ENV || 'development',
+    baseUrl: BASE_URL
   });
 });
 
@@ -657,7 +660,7 @@ app.post('/api/campaigns/:id/send', authenticateToken, async (req, res) => {
 app.get('/track/open/:trackingId', (req, res) => {
   const trackingId = req.params.trackingId;
   const userAgent = req.get('User-Agent');
-  const ipAddress = req.ip || req.connection.remoteAddress;
+  const ipAddress = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'];
 
   console.log(`📊 Email opened - Tracking ID: ${trackingId}`);
 
@@ -670,20 +673,6 @@ app.get('/track/open/:trackingId', (req, res) => {
         console.error('Tracking update error:', err);
       } else if (this.changes > 0) {
         console.log(`✅ Email open tracked: ${trackingId}`);
-
-        // Update campaign stats
-        db.run(`
-          UPDATE outreach_campaigns 
-          SET opened_count = (
-            SELECT COUNT(*) FROM email_tracking 
-            WHERE campaign_id = (
-              SELECT campaign_id FROM email_tracking WHERE tracking_id = ?
-            ) AND opened = 1
-          )
-          WHERE id = (
-            SELECT campaign_id FROM email_tracking WHERE tracking_id = ?
-          )
-        `, [trackingId, trackingId]);
       }
     }
   );
@@ -936,7 +925,7 @@ async function sendProfessionalEmailsWithTracking(campaignId, campaign, contacts
       const personalizedText = personalizeContent(campaign.text_body, contact, campaign);
 
       // Add tracking pixel to HTML
-      const trackingPixel = `<img src="${process.env.BASE_URL}/track/open/${trackingId}" width="1" height="1" style="display:none;" alt="">`;
+      const trackingPixel = `<img src="${BASE_URL}/track/open/${trackingId}" width="1" height="1" style="display:none;" alt="">`;
 
       // Process links for click tracking
       personalizedHtml = await processLinksForTracking(personalizedHtml, trackingId);
@@ -1026,7 +1015,7 @@ async function processLinksForTracking(htmlContent, trackingId) {
     });
 
     // Create tracking URL
-    const trackingUrl = `${process.env.BASE_URL}/track/click/${trackingId}/${linkIndex}`;
+    const trackingUrl = `${BASE_URL}/track/click/${trackingId}/${linkIndex}`;
 
     // Return modified link
     return `<a href="${trackingUrl}">${linkText}</a>`;
@@ -1183,4 +1172,20 @@ async function startServer() {
 startServer().catch(error => {
   console.error('❌ Failed to start server:', error);
   process.exit(1);
+});
+
+// Add graceful shutdown handling:
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  if (emailTransporter) {
+    emailTransporter.close();
+  }
+  db.close((err) => {
+    if (err) {
+      console.error('Error closing database:', err);
+    } else {
+      console.log('Database connection closed');
+    }
+    process.exit(0);
+  });
 });
