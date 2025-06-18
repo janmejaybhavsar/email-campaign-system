@@ -568,7 +568,7 @@ app.post('/api/campaigns/:id/send', authenticateToken, async (req, res) => {
     }
 
     // Create user-specific email transporter
-    const userTransporter = nodemailer.createTransporter({
+    const userTransporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
       port: 587,
       secure: false,
@@ -936,7 +936,7 @@ app.post('/api/user/gmail-config', authenticateToken, async (req, res) => {
   
   try {
     // Test the Gmail configuration before saving
-    const testTransporter = nodemailer.createTransporter({
+    const testTransporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
       port: 587,
       secure: false,
@@ -1022,7 +1022,7 @@ app.post('/api/user/gmail-test', authenticateToken, async (req, res) => {
     }
     
     // Create transporter with user's credentials
-    const userTransporter = nodemailer.createTransporter({
+    const userTransporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
       port: 587,
       secure: false,

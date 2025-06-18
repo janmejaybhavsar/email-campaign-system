@@ -277,6 +277,11 @@
             background: linear-gradient(45deg, #dc2626, #b91c1c);
         }
 
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+
         .alert {
             padding: 20px;
             border-radius: 10px;
@@ -503,6 +508,66 @@
             margin-top: 20px;
         }
 
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            backdrop-filter: blur(4px);
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 20px;
+            max-width: 90%;
+            max-height: 90%;
+            overflow-y: auto;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 30px;
+            border-bottom: 1px solid #e9ecef;
+            background: #f8f9fa;
+            border-radius: 20px 20px 0 0;
+        }
+
+        .modal-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #333;
+            margin: 0;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+            padding: 5px;
+            border-radius: 50%;
+            width: 35px;
+            height: 35px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            background: #e9ecef;
+            color: #333;
+        }
+
         @media (max-width: 768px) {
             .auth-grid {
                 grid-template-columns: 1fr;
@@ -546,7 +611,7 @@
             <div class="professional-intro">
                 <h3>🎯 Professional Cold Email Outreach</h3>
                 <ul>
-                    <li><strong>Personal Touch:</strong> Emails appear as personal messages from you</li>
+                    <li><strong>Personal Touch:</strong> Emails appear as personal messages from your Gmail</li>
                     <li><strong>No Branding:</strong> Clean, professional emails without system signatures</li>
                     <li><strong>Contact Management:</strong> Track companies, positions, and responses</li>
                     <li><strong>Smart Personalization:</strong> Use name, company, position variables</li>
@@ -896,7 +961,7 @@
                         <div class="spinner"></div>
                         <div>Loading Gmail configuration...</div>
                     </div>
-                    
+
                     <!-- Gmail Configuration Form -->
                     <div id="gmailConfigForm" style="display: none;">
                         <form id="gmailForm">
@@ -1041,6 +1106,7 @@
             document.getElementById('campaignForm').addEventListener('submit', handleAddCampaign);
             document.getElementById('importForm').addEventListener('submit', handleImportContacts);
             document.getElementById('editTemplateFormElement').addEventListener('submit', handleEditTemplate);
+            document.getElementById('gmailForm').addEventListener('submit', handleGmailConfig);
         }
 
         // Authentication functions
@@ -1143,14 +1209,39 @@
                 config.body = JSON.stringify(config.body);
             }
 
-            const response = await fetch(url, config);
-            const data = await response.json();
+            console.log('API Call:', config.method || 'GET', url);
 
-            if (!response.ok) {
-                throw new Error(data.error || 'Request failed');
+            try {
+                const response = await fetch(url, config);
+                
+                if (!response.ok) {
+                    let errorMessage = `HTTP ${response.status}`;
+                    try {
+                        const errorData = await response.json();
+                        errorMessage = errorData.error || errorMessage;
+                    } catch (e) {
+                        errorMessage = response.statusText || errorMessage;
+                    }
+                    throw new Error(errorMessage);
+                }
+
+                const data = await response.json();
+                console.log('API Response:', data);
+                return data;
+
+            } catch (error) {
+                console.error('API Error:', error);
+                
+                if (error.name === 'AbortError') {
+                    throw new Error('Request timed out');
+                } else if (error.message.includes('Failed to fetch')) {
+                    throw new Error('Network error - please check your connection');
+                } else if (error.message.includes('502') || error.message.includes('Bad Gateway')) {
+                    throw new Error('Server is temporarily unavailable - please try again in a few minutes');
+                }
+                
+                throw error;
             }
-
-            return data;
         }
 
         // Data loading functions
@@ -1162,6 +1253,7 @@
                     loadTemplates(),
                     loadCampaigns(),
                     loadAnalyticsOverview(),
+                    loadGmailConfig(),
                     loadSystemStatus()
                 ]);
                 updateStats();
@@ -1261,14 +1353,12 @@
             try {
                 const template = await apiCall(`/templates/${templateId}`);
 
-                // Populate edit form
                 document.getElementById('editTemplateId').value = template.id;
                 document.getElementById('editTemplateName').value = template.name;
                 document.getElementById('editTemplateSubject').value = template.subject;
                 document.getElementById('editTemplateHtml').value = template.html_body;
                 document.getElementById('editTemplateText').value = template.text_body || '';
 
-                // Show edit form
                 toggleForm('editTemplateForm');
 
             } catch (error) {
@@ -1358,7 +1448,6 @@
                 document.getElementById('avgOpenRate').textContent = avgOpenRate + '%';
                 document.getElementById('avgClickRate').textContent = avgClickRate + '%';
 
-                // Load detailed analytics
                 loadCampaignAnalytics(campaigns);
 
             } catch (error) {
@@ -1384,44 +1473,44 @@
         <div style="background: rgba(255, 255, 255, 0.95); border-radius: 15px; padding: 30px;">
             <h3 style="margin-bottom: 20px;">📈 Campaign Performance</h3>
             <div class="table-container">
-                <table class="table">
+                <table style="width: 100%; border-collapse: collapse;">
                     <thead>
-                        <tr>
-                            <th>Campaign Name</th>
-                            <th>Status</th>
-                            <th>Sent</th>
-                            <th>Opens</th>
-                            <th>Open Rate</th>
-                            <th>Clicks</th>
-                            <th>Click Rate</th>
-                            <th>Actions</th>
+                        <tr style="border-bottom: 2px solid #e1e5e9;">
+                            <th style="padding: 15px; text-align: left; font-weight: 600;">Campaign Name</th>
+                            <th style="padding: 15px; text-align: center;">Status</th>
+                            <th style="padding: 15px; text-align: center;">Sent</th>
+                            <th style="padding: 15px; text-align: center;">Opens</th>
+                            <th style="padding: 15px; text-align: center;">Open Rate</th>
+                            <th style="padding: 15px; text-align: center;">Clicks</th>
+                            <th style="padding: 15px; text-align: center;">Click Rate</th>
+                            <th style="padding: 15px; text-align: center;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${campaigns.map(campaign => `
-                            <tr>
-                                <td><strong>${escapeHtml(campaign.name)}</strong></td>
-                                <td><span class="status-badge status-${campaign.status}">${campaign.status}</span></td>
-                                <td>${campaign.sent_count}</td>
-                                <td>${campaign.opens}</td>
-                                <td>
-                                    <div style="display: flex; align-items: center; gap: 10px;">
+                            <tr style="border-bottom: 1px solid #f1f3f4;">
+                                <td style="padding: 15px;"><strong>${escapeHtml(campaign.name)}</strong></td>
+                                <td style="padding: 15px; text-align: center;"><span class="status-badge status-${campaign.status}">${campaign.status}</span></td>
+                                <td style="padding: 15px; text-align: center;">${campaign.sent_count}</td>
+                                <td style="padding: 15px; text-align: center;">${campaign.opens}</td>
+                                <td style="padding: 15px; text-align: center;">
+                                    <div style="display: flex; align-items: center; gap: 10px; justify-content: center;">
                                         <div style="background: #e5e7eb; border-radius: 10px; height: 8px; width: 100px; overflow: hidden;">
                                             <div style="background: #10b981; height: 100%; width: ${campaign.openRate}%;"></div>
                                         </div>
                                         <span>${campaign.openRate}%</span>
                                     </div>
                                 </td>
-                                <td>${campaign.clicks}</td>
-                                <td>
-                                    <div style="display: flex; align-items: center; gap: 10px;">
+                                <td style="padding: 15px; text-align: center;">${campaign.clicks}</td>
+                                <td style="padding: 15px; text-align: center;">
+                                    <div style="display: flex; align-items: center; gap: 10px; justify-content: center;">
                                         <div style="background: #e5e7eb; border-radius: 10px; height: 8px; width: 100px; overflow: hidden;">
                                             <div style="background: #3b82f6; height: 100%; width: ${campaign.clickRate}%;"></div>
                                         </div>
                                         <span>${campaign.clickRate}%</span>
                                     </div>
                                 </td>
-                                <td>
+                                <td style="padding: 15px; text-align: center;">
                                     <button class="btn btn-secondary btn-sm" onclick="viewCampaignAnalytics(${campaign.id}, '${escapeHtml(campaign.name)}')">
                                         View Details
                                     </button>
@@ -1443,7 +1532,6 @@
             <div style="padding: 20px;">
                 <h3 style="margin-bottom: 20px;">📊 ${escapeHtml(campaignName)} - Detailed Analytics</h3>
                 
-                <!-- Summary Stats -->
                 <div class="stats-grid" style="margin-bottom: 30px;">
                     <div class="stat-card" style="background: linear-gradient(45deg, #10b981, #059669);">
                         <div class="stat-number">${analytics.trackingStats.opened}</div>
@@ -1463,41 +1551,40 @@
                     </div>
                 </div>
                 
-                <!-- Individual Contact Tracking -->
                 ${analytics.contactTracking.length > 0 ? `
                     <h4 style="margin-bottom: 15px;">👥 Individual Contact Performance</h4>
-                    <div class="table-container">
-                        <table class="table">
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
                             <thead>
-                                <tr>
-                                    <th>Contact</th>
-                                    <th>Company</th>
-                                    <th>Opened</th>
-                                    <th>Clicked</th>
-                                    <th>Clicks</th>
+                                <tr style="border-bottom: 2px solid #e1e5e9;">
+                                    <th style="padding: 12px; text-align: left;">Contact</th>
+                                    <th style="padding: 12px; text-align: left;">Company</th>
+                                    <th style="padding: 12px; text-align: center;">Opened</th>
+                                    <th style="padding: 12px; text-align: center;">Clicked</th>
+                                    <th style="padding: 12px; text-align: center;">Clicks</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 ${analytics.contactTracking.map(contact => `
-                                    <tr>
-                                        <td>
+                                    <tr style="border-bottom: 1px solid #f1f3f4;">
+                                        <td style="padding: 12px;">
                                             <strong>${escapeHtml(contact.name)}</strong><br>
                                             <small style="color: #666;">${escapeHtml(contact.email)}</small>
                                         </td>
-                                        <td>${escapeHtml(contact.company || 'N/A')}</td>
-                                        <td>
+                                        <td style="padding: 12px;">${escapeHtml(contact.company || 'N/A')}</td>
+                                        <td style="padding: 12px; text-align: center;">
                                             ${contact.opened ?
                         `<span style="color: #10b981;">✅ ${formatDate(contact.opened_at)}</span>` :
                         '<span style="color: #6b7280;">❌ Not opened</span>'
                     }
                                         </td>
-                                        <td>
+                                        <td style="padding: 12px; text-align: center;">
                                             ${contact.clicked ?
                         `<span style="color: #3b82f6;">🔗 ${formatDate(contact.clicked_at)}</span>` :
                         '<span style="color: #6b7280;">❌ Not clicked</span>'
                     }
                                         </td>
-                                        <td>${contact.clicks_count || 0}</td>
+                                        <td style="padding: 12px; text-align: center;">${contact.clicks_count || 0}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -1515,6 +1602,127 @@
             }
         }
 
+        // Gmail Configuration Functions
+        async function loadGmailConfig() {
+            try {
+                const config = await apiCall('/user/gmail-config');
+                const statusContainer = document.getElementById('gmailConfigStatus');
+                const formContainer = document.getElementById('gmailConfigForm');
+
+                if (config.configured) {
+                    statusContainer.innerHTML = `
+                        <div class="alert alert-${config.verified ? 'success' : 'warning'}">
+                            <strong>📧 Gmail Status:</strong> ${config.verified ? '✅ Configured & Verified' : '⚠️ Configured but Not Verified'}<br>
+                            <strong>Gmail Account:</strong> ${config.gmailAddress}<br>
+                            ${config.lastTested ? `<strong>Last Tested:</strong> ${formatDate(config.lastTested)}<br>` : ''}
+                            ${!config.verified ? '<br><em>Click "Test Gmail" to verify your configuration</em>' : ''}
+                        </div>
+                    `;
+                    
+                    document.getElementById('gmailAddress').value = config.gmailAddress;
+                    document.getElementById('removeGmailBtn').style.display = 'inline-block';
+                } else {
+                    statusContainer.innerHTML = `
+                        <div class="alert alert-warning">
+                            <strong>⚠️ Gmail Not Configured</strong><br>
+                            Please configure your Gmail account below to start sending cold emails.
+                        </div>
+                    `;
+                }
+
+                formContainer.style.display = 'block';
+                statusContainer.style.display = 'block';
+
+            } catch (error) {
+                document.getElementById('gmailConfigStatus').innerHTML = `
+                    <div class="alert alert-danger">❌ Error loading Gmail configuration: ${error.message}</div>
+                `;
+            }
+        }
+
+        async function handleGmailConfig(e) {
+            e.preventDefault();
+            const gmailAddress = document.getElementById('gmailAddress').value;
+            const gmailAppPassword = document.getElementById('gmailAppPassword').value;
+
+            if (!gmailAddress || !gmailAppPassword) {
+                showAlert('❌ Please enter both Gmail address and app password', 'danger');
+                return;
+            }
+
+            const submitButton = e.target.querySelector('button[type="submit"]');
+            const originalText = submitButton.textContent;
+            submitButton.textContent = '🔄 Saving & Testing...';
+            submitButton.disabled = true;
+
+            try {
+                const response = await apiCall('/user/gmail-config', {
+                    method: 'POST',
+                    body: { gmailAddress, gmailAppPassword }
+                });
+
+                showAlert('✅ ' + response.message, 'success');
+                document.getElementById('gmailAppPassword').value = '';
+                loadGmailConfig();
+
+            } catch (error) {
+                if (error.message.includes('verification failed')) {
+                    showAlert('⚠️ Gmail saved but verification failed. Please check your app password and try "Test Gmail".', 'warning');
+                } else {
+                    showAlert('❌ Gmail configuration failed: ' + error.message, 'danger');
+                }
+            } finally {
+                submitButton.textContent = originalText;
+                submitButton.disabled = false;
+            }
+        }
+
+        async function testUserGmail() {
+            const testButton = document.querySelector('button[onclick="testUserGmail()"]');
+            if (testButton) {
+                const originalText = testButton.textContent;
+                testButton.textContent = '🧪 Testing...';
+                testButton.disabled = true;
+
+                try {
+                    const response = await apiCall('/user/gmail-test', {
+                        method: 'POST'
+                    });
+
+                    showAlert('✅ ' + response.message, 'success');
+                    loadGmailConfig();
+
+                } catch (error) {
+                    showAlert('❌ Gmail test failed: ' + error.message, 'danger');
+                } finally {
+                    if (testButton) {
+                        testButton.textContent = originalText;
+                        testButton.disabled = false;
+                    }
+                }
+            }
+        }
+
+        async function removeGmailConfig() {
+            if (!confirm('Are you sure you want to remove your Gmail configuration? You will not be able to send campaigns until you configure Gmail again.')) {
+                return;
+            }
+
+            try {
+                await apiCall('/user/gmail-config', {
+                    method: 'DELETE'
+                });
+
+                showAlert('✅ Gmail configuration removed successfully', 'success');
+                document.getElementById('gmailForm').reset();
+                document.getElementById('removeGmailBtn').style.display = 'none';
+                loadGmailConfig();
+
+            } catch (error) {
+                showAlert('❌ Failed to remove Gmail configuration: ' + error.message, 'danger');
+            }
+        }
+
         async function loadSystemStatus() {
             try {
                 const response = await fetch('/health');
@@ -1523,9 +1731,10 @@
                 document.getElementById('systemStatus').innerHTML = `
                     <div class="alert alert-${data.status === 'healthy' ? 'success' : 'danger'}">
                         <strong>🔧 System Status:</strong> ${data.status}<br>
-                        <strong>📧 Email Service:</strong> ${data.emailServiceConnected ? '✅ Ready for Professional Outreach' : '❌ Not Configured'}<br>
+                        <strong>📧 Email Service:</strong> ${data.emailServiceType || 'Individual User Gmail Accounts'}<br>
                         <strong>⏱️ Uptime:</strong> ${Math.round(data.uptime)} seconds<br>
-                        <strong>🌍 Environment:</strong> Professional Cold Email System
+                        <strong>🌍 Environment:</strong> Professional Cold Email System<br>
+                        <strong>💾 Memory:</strong> ${data.memory ? data.memory.used + ' / ' + data.memory.total : 'N/A'}
                     </div>
                 `;
             } catch (error) {
@@ -1540,9 +1749,8 @@
             const templates = document.querySelectorAll('#templatesList .list-item').length;
             const campaigns = document.querySelectorAll('#campaignsList .list-item').length;
 
-            // Calculate total emails sent from campaigns
-            const campaignElements = document.querySelectorAll('#campaignsList .list-item');
             let totalSent = 0;
+            const campaignElements = document.querySelectorAll('#campaignsList .list-item');
             campaignElements.forEach(element => {
                 const text = element.textContent;
                 const match = text.match(/Sent: (\d+)/);
@@ -1679,8 +1887,14 @@
                 return;
             }
 
+            const submitButton = e.target.querySelector('button[type="submit"]');
+            const originalText = submitButton.textContent;
+            submitButton.textContent = '🚀 Starting Campaign...';
+            submitButton.disabled = true;
+
             try {
-                // Create campaign
+                console.log('Creating campaign:', { name, templateId, delay });
+
                 const campaignResponse = await apiCall('/campaigns', {
                     method: 'POST',
                     body: {
@@ -1690,29 +1904,63 @@
                     }
                 });
 
-                // Send campaign immediately
-                const sendResponse = await apiCall(`/campaigns/${campaignResponse.id}/send`, {
-                    method: 'POST'
-                });
+                console.log('Campaign created:', campaignResponse);
 
-                showAlert(`🚀 Professional outreach "${name}" started! Reaching out to ${sendResponse.totalContacts} contacts.`, 'success');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+                try {
+                    const sendResponse = await fetch(`${API_BASE}/campaigns/${campaignResponse.id}/send`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${authToken}`
+                        },
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (!sendResponse.ok) {
+                        const errorData = await sendResponse.json();
+                        throw new Error(errorData.error || 'Failed to start campaign');
+                    }
+
+                    const result = await sendResponse.json();
+                    
+                    showAlert(`🚀 ${result.message}`, 'success');
+                    
+                } catch (fetchError) {
+                    if (fetchError.name === 'AbortError') {
+                        showAlert('🚀 Campaign started! Due to server limitations, emails are being sent in the background. Check the campaigns tab in a few minutes to see progress.', 'info');
+                    } else {
+                        throw fetchError;
+                    }
+                }
+
                 toggleForm('addCampaignForm');
                 document.getElementById('campaignForm').reset();
-                loadCampaigns();
-                loadContacts(); // Refresh to show contacted status
-                updateStats();
+                
+                setTimeout(() => {
+                    loadCampaigns();
+                    loadContacts();
+                    updateStats();
+                }, 2000);
+
             } catch (error) {
+                console.error('Campaign error:', error);
                 showAlert('❌ Campaign error: ' + error.message, 'danger');
+            } finally {
+                submitButton.textContent = originalText;
+                submitButton.disabled = false;
             }
         }
 
         // UI functions
         function showTab(tabName) {
-            // Update tab buttons
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
             event.target.classList.add('active');
 
-            // Update content sections
             document.querySelectorAll('.content-section').forEach(section => {
                 section.classList.remove('active');
             });
@@ -1730,21 +1978,6 @@
             }
         }
 
-        async function testEmailConnection() {
-            try {
-                const response = await fetch('/health');
-                const data = await response.json();
-
-                if (data.emailServiceConnected) {
-                    showAlert('✅ Professional email service is ready for outreach!', 'success');
-                } else {
-                    showAlert('❌ Email service not configured. Please check your Gmail settings in .env file.', 'danger');
-                }
-            } catch (error) {
-                showAlert('❌ Error testing email connection: ' + error.message, 'danger');
-            }
-        }
-
         // Utility functions
         function showAlert(message, type) {
             const alert = document.createElement('div');
@@ -1758,7 +1991,6 @@
 
             document.body.insertBefore(alert, document.body.firstChild);
 
-            // Auto remove after 8 seconds
             setTimeout(() => {
                 if (alert.parentElement) {
                     alert.remove();
@@ -1790,81 +2022,16 @@
         function hideModal(modalId) {
             document.getElementById(modalId).style.display = 'none';
         }
-        const modalStyles = `
-.modal {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 1000;
-    backdrop-filter: blur(4px);
-    justify-content: center;
-    align-items: center;
-}
 
-.modal-content {
-    background: white;
-    border-radius: 20px;
-    max-width: 90%;
-    max-height: 90%;
-    overflow-y: auto;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
-}
+        // Auto-refresh campaign status every 30 seconds when on campaigns tab
+        setInterval(() => {
+            const campaignsTab = document.getElementById('campaigns');
+            if (campaignsTab && campaignsTab.classList.contains('active')) {
+                loadCampaigns();
+            }
+        }, 30000);
 
-.modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 20px 30px;
-    border-bottom: 1px solid #e9ecef;
-    background: #f8f9fa;
-    border-radius: 20px 20px 0 0;
-}
-
-.modal-title {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #333;
-    margin: 0;
-}
-
-.modal-close {
-    background: none;
-    border: none;
-    font-size: 24px;
-    cursor: pointer;
-    color: #666;
-    padding: 5px;
-    border-radius: 50%;
-    width: 35px;
-    height: 35px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.modal-close:hover {
-    background: #e9ecef;
-    color: #333;
-}
-
-.btn-sm {
-    padding: 8px 16px;
-    font-size: 14px;
-}
-`;
-
-        // Add the modal styles to the page
-        const styleSheet = document.createElement('style');
-        styleSheet.textContent = modalStyles;
-        document.head.appendChild(styleSheet);
-
-        console.log('✅ Enhanced Professional Cold Email System with Template Editing & Analytics loaded!');
-
-        console.log('✅ Professional Cold Email System initialized successfully!');
+        console.log('✅ Professional Cold Email System with Individual Gmail Configuration loaded!');
     </script>
 </body>
 
