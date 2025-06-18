@@ -162,45 +162,76 @@ db.serialize(() => {
   });
 
   console.log('✅ Database tables initialized');
+  db.all("PRAGMA table_info(users)", (err, columns) => {
+    if (err) {
+      console.error('Error checking table info:', err);
+      return;
+    }
+    
+    const columnNames = columns.map(col => col.name);
+    
+    // Add new columns if they don't exist
+    const newColumns = [
+      { name: 'gmail_address', sql: 'ALTER TABLE users ADD COLUMN gmail_address TEXT' },
+      { name: 'gmail_app_password', sql: 'ALTER TABLE users ADD COLUMN gmail_app_password TEXT' },
+      { name: 'gmail_configured', sql: 'ALTER TABLE users ADD COLUMN gmail_configured BOOLEAN DEFAULT 0' },
+      { name: 'gmail_verified', sql: 'ALTER TABLE users ADD COLUMN gmail_verified BOOLEAN DEFAULT 0' },
+      { name: 'gmail_last_tested', sql: 'ALTER TABLE users ADD COLUMN gmail_last_tested DATETIME' }
+    ];
+    
+    newColumns.forEach(column => {
+      if (!columnNames.includes(column.name)) {
+        db.run(column.sql, (err) => {
+          if (err) {
+            console.error(`Error adding column ${column.name}:`, err);
+          } else {
+            console.log(`✅ Added column: ${column.name}`);
+          }
+        });
+      }
+    });
+  });
+  
+  console.log('✅ Database schema updated for individual Gmail settings');
 });
 
 // =============================================================================
 // EMAIL SERVICE SETUP
 // =============================================================================
 
-let emailTransporter = null;
+// let emailTransporter = null;
 
-async function initializeEmailService() {
-  try {
-    if (!process.env.SMTP_USERNAME || process.env.SMTP_USERNAME === 'YOUR_GMAIL_ADDRESS_HERE') {
-      console.log('⚠️  Gmail not configured in .env file');
-      return false;
-    }
+// async function initializeEmailService() {
+//   try {
+//     if (!process.env.SMTP_USERNAME || process.env.SMTP_USERNAME === 'YOUR_GMAIL_ADDRESS_HERE') {
+//       console.log('⚠️  Gmail not configured in .env file');
+//       return false;
+//     }
 
-    console.log('🔧 Configuring professional email service...');
-    console.log(`📧 Your email: ${process.env.SMTP_USERNAME}`);
+//     console.log('🔧 Configuring professional email service...');
+//     console.log(`📧 Your email: ${process.env.SMTP_USERNAME}`);
 
-    emailTransporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USERNAME,
-        pass: process.env.SMTP_PASSWORD
-      },
-      tls: {
-        rejectUnauthorized: false
-      }
-    });
+//     emailTransporter = nodemailer.createTransport({
+//       host: process.env.SMTP_HOST,
+//       port: parseInt(process.env.SMTP_PORT),
+//       secure: process.env.SMTP_SECURE === 'true',
+//       auth: {
+//         user: process.env.SMTP_USERNAME,
+//         pass: process.env.SMTP_PASSWORD
+//       },
+//       tls: {
+//         rejectUnauthorized: false
+//       }
+//     });
 
-    await emailTransporter.verify();
-    console.log('✅ Professional email service ready!');
-    return true;
-  } catch (error) {
-    console.log('❌ Email service connection failed:', error.message);
-    return false;
-  }
-}
+//     await emailTransporter.verify();
+//     console.log('✅ Professional email service ready!');
+//     return true;
+//   } catch (error) {
+//     console.log('❌ Email service connection failed:', error.message);
+//     return false;
+//   }
+// }
 
 // =============================================================================
 // AUTHENTICATION
@@ -228,13 +259,19 @@ const authenticateToken = (req, res, next) => {
 // =============================================================================
 
 app.get('/health', (req, res) => {
+  const memUsage = process.memoryUsage();
+  
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    emailServiceConnected: !!emailTransporter,
+    emailServiceType: 'Individual User Gmail Accounts',
     environment: process.env.NODE_ENV || 'development',
-    baseUrl: BASE_URL
+    baseUrl: process.env.BASE_URL,
+    memory: {
+      used: Math.round(memUsage.heapUsed / 1024 / 1024) + 'MB',
+      total: Math.round(memUsage.heapTotal / 1024 / 1024) + 'MB'
+    }
   });
 });
 
@@ -512,145 +549,113 @@ app.get('/api/campaigns', authenticateToken, (req, res) => {
 app.post('/api/campaigns/:id/send', authenticateToken, async (req, res) => {
   const campaignId = req.params.id;
 
-  console.log(`🔍 Attempting to send campaign ID: ${campaignId} for user: ${req.user.userId}`);
-
-  if (!emailTransporter) {
-    return res.status(500).json({
-      error: 'Email service not configured. Please check your Gmail settings.'
-    });
-  }
+  console.log(`🔍 Starting campaign ${campaignId} for user ${req.user.userId}`);
 
   try {
-    // First, let's check if the campaign exists
-    const campaignCheck = await new Promise((resolve, reject) => {
-      db.get(
-        'SELECT * FROM outreach_campaigns WHERE id = ? AND user_id = ?',
-        [campaignId, req.user.userId],
-        (err, row) => {
-          if (err) {
-            console.error('Campaign check error:', err);
-            reject(err);
-          } else {
-            console.log('Campaign check result:', row);
-            resolve(row);
-          }
-        }
-      );
-    });
-
-    if (!campaignCheck) {
-      console.log(`❌ Campaign ${campaignId} not found for user ${req.user.userId}`);
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-
-    // Get template info
-    const template = await new Promise((resolve, reject) => {
-      db.get(
-        'SELECT * FROM templates WHERE id = ? AND user_id = ?',
-        [campaignCheck.template_id, req.user.userId],
-        (err, row) => {
-          if (err) {
-            console.error('Template check error:', err);
-            reject(err);
-          } else {
-            console.log('Template check result:', row);
-            resolve(row);
-          }
-        }
-      );
-    });
-
-    if (!template) {
-      console.log(`❌ Template ${campaignCheck.template_id} not found`);
-      return res.status(404).json({ error: 'Template not found' });
-    }
-
-    // Get user info
+    // First check if user has Gmail configured
     const user = await new Promise((resolve, reject) => {
       db.get(
         'SELECT * FROM users WHERE id = ?',
         [req.user.userId],
-        (err, row) => {
-          if (err) {
-            console.error('User check error:', err);
-            reject(err);
-          } else {
-            console.log('User check result:', row);
-            resolve(row);
-          }
-        }
+        (err, user) => err ? reject(err) : resolve(user)
       );
     });
 
-    if (!user) {
-      console.log(`❌ User ${req.user.userId} not found`);
-      return res.status(404).json({ error: 'User not found' });
+    if (!user.gmail_configured || !user.gmail_address || !user.gmail_app_password) {
+      return res.status(400).json({
+        error: 'Gmail not configured. Please configure your Gmail settings in the Settings tab before sending campaigns.'
+      });
     }
 
-    // Combine all the data
-    const campaign = {
-      ...campaignCheck,
-      subject: template.subject,
-      html_body: template.html_body,
-      text_body: template.text_body,
-      template_name: template.name,
-      user_name: user.name,
-      signature: user.signature
-    };
-
-    console.log('✅ Campaign data prepared:', {
-      id: campaign.id,
-      name: campaign.name,
-      template_name: campaign.template_name,
-      user_name: campaign.user_name
+    // Create user-specific email transporter
+    const userTransporter = nodemailer.createTransporter({
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false,
+      auth: {
+        user: user.gmail_address,
+        pass: user.gmail_app_password
+      },
+      tls: {
+        rejectUnauthorized: false
+      }
     });
 
-    // Get contacts that haven't been contacted yet
+    // Verify user's Gmail connection
+    try {
+      await userTransporter.verify();
+    } catch (error) {
+      return res.status(400).json({
+        error: 'Gmail connection failed. Please check your Gmail settings.',
+        details: error.message
+      });
+    }
+
+    // Get campaign with template data
+    const campaignData = await new Promise((resolve, reject) => {
+      db.get(`
+        SELECT 
+          c.*,
+          t.name as template_name,
+          t.subject,
+          t.html_body,
+          t.text_body
+        FROM outreach_campaigns c
+        JOIN templates t ON c.template_id = t.id
+        WHERE c.id = ? AND c.user_id = ?
+      `, [campaignId, req.user.userId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!campaignData) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+
+    // Get available contacts
     const contacts = await new Promise((resolve, reject) => {
       db.all(
-        'SELECT * FROM contacts WHERE user_id = ? AND contacted = 0',
+        'SELECT * FROM contacts WHERE user_id = ? AND contacted = 0 LIMIT 50',
         [req.user.userId],
-        (err, rows) => {
-          if (err) {
-            console.error('Contacts check error:', err);
-            reject(err);
-          } else {
-            console.log(`Found ${rows.length} contacts to reach out to`);
-            resolve(rows);
-          }
-        }
+        (err, rows) => err ? reject(err) : resolve(rows)
       );
     });
 
     if (contacts.length === 0) {
-      return res.status(400).json({ error: 'No new contacts to reach out to. All contacts have already been contacted.' });
+      return res.status(400).json({ 
+        error: 'No new contacts to reach out to. All contacts have already been contacted.' 
+      });
     }
 
-    // Update campaign status
+    // Update campaign status immediately
     db.run(
       'UPDATE outreach_campaigns SET status = ?, total_contacts = ? WHERE id = ?',
-      ['sending', contacts.length, campaignId],
-      (err) => {
-        if (err) {
-          console.error('Campaign update error:', err);
-        } else {
-          console.log(`✅ Campaign ${campaignId} status updated to sending`);
-        }
-      }
+      ['sending', contacts.length, campaignId]
     );
 
-    // Start sending emails asynchronously
-    setTimeout(() => sendProfessionalEmailsWithTracking(campaignId, campaign, contacts), 100);
-
-    console.log(`🚀 Outreach campaign "${campaign.name}" started - reaching out to ${contacts.length} contacts`);
+    // Send response immediately to prevent timeout
     res.json({
-      message: 'Outreach campaign started!',
+      message: `Campaign started using ${user.gmail_address}! Emails are being sent in the background.`,
       totalContacts: contacts.length,
-      campaignName: campaign.name
+      campaignName: campaignData.name,
+      gmailAccount: user.gmail_address
+    });
+
+    // Start sending emails asynchronously with user's transporter
+    setImmediate(() => {
+      sendEmailsWithUserGmail(campaignId, campaignData, contacts, user, userTransporter)
+        .catch(error => {
+          console.error('Background email sending failed:', error);
+          db.run(
+            'UPDATE outreach_campaigns SET status = ? WHERE id = ?',
+            ['failed', campaignId]
+          );
+        });
     });
 
   } catch (error) {
-    console.error('❌ Send campaign error:', error);
+    console.error('❌ Campaign start error:', error);
     res.status(500).json({ error: 'Failed to start campaign: ' + error.message });
   }
 });
@@ -890,112 +895,336 @@ app.get('/api/campaigns/analytics/summary', authenticateToken, (req, res) => {
   );
 });
 
+// Get user's Gmail configuration status
+app.get('/api/user/gmail-config', authenticateToken, (req, res) => {
+  db.get(
+    'SELECT gmail_address, gmail_configured, gmail_verified, gmail_last_tested FROM users WHERE id = ?',
+    [req.user.userId],
+    (err, user) => {
+      if (err) {
+        return res.status(500).json({ error: 'Failed to get Gmail configuration' });
+      }
+      
+      res.json({
+        gmailAddress: user.gmail_address || '',
+        configured: !!user.gmail_configured,
+        verified: !!user.gmail_verified,
+        lastTested: user.gmail_last_tested
+      });
+    }
+  );
+});
+
+// Save user's Gmail configuration
+app.post('/api/user/gmail-config', authenticateToken, async (req, res) => {
+  const { gmailAddress, gmailAppPassword } = req.body;
+  
+  if (!gmailAddress || !gmailAppPassword) {
+    return res.status(400).json({ error: 'Gmail address and app password are required' });
+  }
+  
+  // Basic email validation
+  const emailRegex = /^[^\s@]+@gmail\.com$/i;
+  if (!emailRegex.test(gmailAddress)) {
+    return res.status(400).json({ error: 'Please enter a valid Gmail address' });
+  }
+  
+  // App password validation (should be 16 characters)
+  if (gmailAppPassword.replace(/\s/g, '').length !== 16) {
+    return res.status(400).json({ error: 'Gmail app password should be 16 characters long' });
+  }
+  
+  try {
+    // Test the Gmail configuration before saving
+    const testTransporter = nodemailer.createTransporter({
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false,
+      auth: {
+        user: gmailAddress,
+        pass: gmailAppPassword.replace(/\s/g, '') // Remove any spaces
+      },
+      tls: {
+        rejectUnauthorized: false
+      }
+    });
+    
+    // Verify the connection
+    await testTransporter.verify();
+    
+    // If verification successful, save the configuration
+    db.run(
+      `UPDATE users SET 
+       gmail_address = ?, 
+       gmail_app_password = ?, 
+       gmail_configured = 1, 
+       gmail_verified = 1, 
+       gmail_last_tested = CURRENT_TIMESTAMP 
+       WHERE id = ?`,
+      [gmailAddress, gmailAppPassword.replace(/\s/g, ''), req.user.userId],
+      function(err) {
+        if (err) {
+          console.error('Error saving Gmail config:', err);
+          return res.status(500).json({ error: 'Failed to save Gmail configuration' });
+        }
+        
+        console.log(`✅ Gmail configured for user ${req.user.userId}: ${gmailAddress}`);
+        res.json({ 
+          message: 'Gmail configuration saved and verified successfully!',
+          verified: true 
+        });
+      }
+    );
+    
+  } catch (error) {
+    console.error('Gmail verification failed:', error);
+    
+    // Save as configured but not verified
+    db.run(
+      `UPDATE users SET 
+       gmail_address = ?, 
+       gmail_app_password = ?, 
+       gmail_configured = 1, 
+       gmail_verified = 0, 
+       gmail_last_tested = CURRENT_TIMESTAMP 
+       WHERE id = ?`,
+      [gmailAddress, gmailAppPassword.replace(/\s/g, ''), req.user.userId],
+      function(err) {
+        if (err) {
+          console.error('Error saving Gmail config:', err);
+          return res.status(500).json({ error: 'Failed to save Gmail configuration' });
+        }
+        
+        res.status(400).json({ 
+          error: 'Gmail verification failed. Please check your credentials.',
+          details: error.message,
+          saved: true
+        });
+      }
+    );
+  }
+});
+
+// Test user's Gmail configuration
+app.post('/api/user/gmail-test', authenticateToken, async (req, res) => {
+  try {
+    // Get user's Gmail configuration
+    const user = await new Promise((resolve, reject) => {
+      db.get(
+        'SELECT gmail_address, gmail_app_password FROM users WHERE id = ?',
+        [req.user.userId],
+        (err, user) => err ? reject(err) : resolve(user)
+      );
+    });
+    
+    if (!user || !user.gmail_address || !user.gmail_app_password) {
+      return res.status(400).json({ error: 'Gmail not configured. Please configure your Gmail settings first.' });
+    }
+    
+    // Create transporter with user's credentials
+    const userTransporter = nodemailer.createTransporter({
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false,
+      auth: {
+        user: user.gmail_address,
+        pass: user.gmail_app_password
+      },
+      tls: {
+        rejectUnauthorized: false
+      }
+    });
+    
+    // Verify connection
+    await userTransporter.verify();
+    
+    // Send test email
+    const testEmail = {
+      from: `"${req.user.name}" <${user.gmail_address}>`,
+      to: user.gmail_address, // Send to self
+      subject: `Gmail Test - ${new Date().toLocaleString()}`,
+      html: `
+        <h2>🎉 Gmail Configuration Test Successful!</h2>
+        <p>Hi ${req.user.name},</p>
+        <p>Your Gmail configuration is working perfectly! Your cold email system is ready to use.</p>
+        <p><strong>Gmail Account:</strong> ${user.gmail_address}</p>
+        <p><strong>Test Time:</strong> ${new Date().toLocaleString()}</p>
+        <p>You can now start sending professional cold emails using your own Gmail account.</p>
+        <hr>
+        <p><small>This test email was sent from your Professional Cold Email System</small></p>
+      `,
+      text: `Gmail Configuration Test Successful!\n\nHi ${req.user.name},\n\nYour Gmail configuration is working perfectly! Your cold email system is ready to use.\n\nGmail Account: ${user.gmail_address}\nTest Time: ${new Date().toLocaleString()}\n\nYou can now start sending professional cold emails using your own Gmail account.`
+    };
+    
+    const result = await userTransporter.sendMail(testEmail);
+    
+    // Update verification status
+    db.run(
+      'UPDATE users SET gmail_verified = 1, gmail_last_tested = CURRENT_TIMESTAMP WHERE id = ?',
+      [req.user.userId]
+    );
+    
+    console.log(`✅ Gmail test successful for user ${req.user.userId}: ${user.gmail_address}`);
+    
+    res.json({
+      success: true,
+      message: 'Gmail test successful! Check your inbox for the test email.',
+      messageId: result.messageId,
+      sentTo: user.gmail_address
+    });
+    
+  } catch (error) {
+    console.error('Gmail test failed:', error);
+    
+    // Update verification status to failed
+    db.run(
+      'UPDATE users SET gmail_verified = 0, gmail_last_tested = CURRENT_TIMESTAMP WHERE id = ?',
+      [req.user.userId]
+    );
+    
+    res.status(400).json({
+      success: false,
+      error: 'Gmail test failed',
+      details: error.message
+    });
+  }
+});
+
+// Remove user's Gmail configuration
+app.delete('/api/user/gmail-config', authenticateToken, (req, res) => {
+  db.run(
+    `UPDATE users SET 
+     gmail_address = NULL, 
+     gmail_app_password = NULL, 
+     gmail_configured = 0, 
+     gmail_verified = 0, 
+     gmail_last_tested = NULL 
+     WHERE id = ?`,
+    [req.user.userId],
+    function(err) {
+      if (err) {
+        return res.status(500).json({ error: 'Failed to remove Gmail configuration' });
+      }
+      
+      console.log(`✅ Gmail configuration removed for user ${req.user.userId}`);
+      res.json({ message: 'Gmail configuration removed successfully' });
+    }
+  );
+});
+
 // =============================================================================
 // PROFESSIONAL EMAIL SENDING FUNCTION
 // =============================================================================
 
-async function sendProfessionalEmailsWithTracking(campaignId, campaign, contacts) {
+// Updated email sending function with user's Gmail
+async function sendEmailsWithUserGmail(campaignId, campaign, contacts, user, userTransporter) {
   const settings = JSON.parse(campaign.settings || '{}');
-  const delay = settings.delay || 30000;
+  const delay = Math.max(settings.delay || 30000, 15000);
+  const maxEmails = Math.min(contacts.length, 20);
+
+  console.log(`📧 Starting email sending from ${user.gmail_address} to ${maxEmails} contacts...`);
 
   let sentCount = 0;
   let failedCount = 0;
 
-  console.log(`📧 Starting tracked professional outreach to ${contacts.length} contacts...`);
-
-  for (let i = 0; i < contacts.length; i++) {
+  for (let i = 0; i < maxEmails; i++) {
     const contact = contacts[i];
 
     try {
-      // Generate unique tracking ID
-      const trackingId = uuidv4();
+      await Promise.race([
+        sendSingleEmailWithUserGmail(campaignId, campaign, contact, user, userTransporter),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Email timeout')), 10000)
+        )
+      ]);
 
-      // Create tracking record
-      await new Promise((resolve, reject) => {
-        db.run(
-          'INSERT INTO email_tracking (campaign_id, contact_id, email, tracking_id) VALUES (?, ?, ?, ?)',
-          [campaignId, contact.id, contact.email, trackingId],
-          (err) => err ? reject(err) : resolve()
-        );
-      });
-
-      // Personalize content
-      const personalizedSubject = personalizeContent(campaign.subject, contact, campaign);
-      let personalizedHtml = personalizeContent(campaign.html_body, contact, campaign);
-      const personalizedText = personalizeContent(campaign.text_body, contact, campaign);
-
-      // Add tracking pixel to HTML
-      const trackingPixel = `<img src="${BASE_URL}/track/open/${trackingId}" width="1" height="1" style="display:none;" alt="">`;
-
-      // Process links for click tracking
-      personalizedHtml = await processLinksForTracking(personalizedHtml, trackingId);
-
-      // Add tracking pixel at the end
-      personalizedHtml += trackingPixel;
-
-      // Add professional signature if available
-      if (campaign.signature) {
-        personalizedHtml += '<br><br>' + campaign.signature.replace(/\n/g, '<br>');
-      }
-
-      console.log(`📤 Sending tracked email to: ${contact.name} (${contact.email})`);
-
-      // Send email
-      const emailResult = await emailTransporter.sendMail({
-        from: `"${campaign.user_name}" <${process.env.SMTP_FROM_EMAIL}>`,
-        to: contact.email,
-        subject: personalizedSubject,
-        html: personalizedHtml,
-        text: personalizedText + (campaign.signature ? '\n\n' + campaign.signature : ''),
-        headers: {
-          'Reply-To': process.env.SMTP_FROM_EMAIL,
-          'X-Priority': '3',
-          'X-Mailer': 'Personal'
-        }
-      });
-
-      // Mark contact as contacted
-      await new Promise((resolve, reject) => {
-        db.run(
-          'UPDATE contacts SET contacted = 1, last_contacted = CURRENT_TIMESTAMP WHERE id = ?',
-          [contact.id],
-          (err) => err ? reject(err) : resolve()
-        );
-      });
-
-      // Log the outreach
-      await logOutreach(campaignId, contact.id, contact.email, 'sent', personalizedSubject);
       sentCount++;
+      console.log(`✅ Email ${sentCount}/${maxEmails} sent from ${user.gmail_address} to: ${contact.email}`);
 
-      console.log(`✅ ${sentCount}/${contacts.length} - Tracked email sent to: ${contact.name} (${contact.email})`);
+      // Update progress
+      db.run(
+        'UPDATE outreach_campaigns SET sent_count = ? WHERE id = ?',
+        [sentCount, campaignId]
+      );
 
-      // Professional delay between emails
-      if (delay > 0 && i < contacts.length - 1) {
-        console.log(`⏳ Waiting ${delay / 1000} seconds before next email...`);
+      // Delay between emails
+      if (i < maxEmails - 1) {
+        console.log(`⏳ Waiting ${delay/1000}s before next email...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
 
     } catch (error) {
-      console.error(`❌ Failed to send email to ${contact.email}:`, error);
-      await logOutreach(campaignId, contact.id, contact.email, 'failed', '', error.message);
+      console.error(`❌ Failed to send to ${contact.email}:`, error.message);
       failedCount++;
+      
+      await logOutreach(campaignId, contact.id, contact.email, 'failed', '', error.message);
     }
   }
 
-  // Update campaign completion
+  // Final status update
+  const finalStatus = sentCount > 0 ? 'completed' : 'failed';
+  db.run(
+    'UPDATE outreach_campaigns SET status = ?, sent_count = ? WHERE id = ?',
+    [finalStatus, sentCount, campaignId]
+  );
+
+  console.log(`🎉 Campaign ${campaignId} completed from ${user.gmail_address}: ${sentCount} sent, ${failedCount} failed`);
+}
+
+// Updated individual email sending function
+async function sendSingleEmailWithUserGmail(campaignId, campaign, contact, user, userTransporter) {
+  // Generate tracking ID
+  const trackingId = require('uuid').v4();
+
+  // Create tracking record
   await new Promise((resolve, reject) => {
     db.run(
-      'UPDATE outreach_campaigns SET status = ?, sent_count = ? WHERE id = ?',
-      ['completed', sentCount, campaignId],
+      'INSERT INTO email_tracking (campaign_id, contact_id, email, tracking_id) VALUES (?, ?, ?, ?)',
+      [campaignId, contact.id, contact.email, trackingId],
       (err) => err ? reject(err) : resolve()
     );
   });
 
-  console.log(`🎉 Professional outreach campaign completed with tracking!`);
-  console.log(`   ✅ Successfully sent: ${sentCount}`);
-  console.log(`   ❌ Failed: ${failedCount}`);
-  console.log(`   📊 Success rate: ${Math.round((sentCount / contacts.length) * 100)}%`);
-  console.log(`   🔍 All emails are now tracked for opens and clicks`);
+  // Personalize content with user data
+  const personalizedSubject = personalizeContent(campaign.subject, contact, { ...campaign, user_name: user.name });
+  let personalizedHtml = personalizeContent(campaign.html_body, contact, { ...campaign, user_name: user.name });
+  const personalizedText = personalizeContent(campaign.text_body, contact, { ...campaign, user_name: user.name });
+
+  // Add tracking
+  const baseUrl = process.env.BASE_URL || 'https://email-campaign-system.onrender.com';
+  const trackingPixel = `<img src="${baseUrl}/track/open/${trackingId}" width="1" height="1" style="display:none;" alt="">`;
+  personalizedHtml += trackingPixel;
+
+  // Add user's signature
+  if (user.signature) {
+    personalizedHtml += '<br><br>' + user.signature.replace(/\n/g, '<br>');
+  }
+
+  // Send email using user's Gmail
+  await userTransporter.sendMail({
+    from: `"${user.name}" <${user.gmail_address}>`,
+    to: contact.email,
+    subject: personalizedSubject,
+    html: personalizedHtml,
+    text: personalizedText + (user.signature ? '\n\n' + user.signature : ''),
+    headers: {
+      'Reply-To': user.gmail_address,
+      'X-Priority': '3',
+      'X-Mailer': 'Personal'
+    }
+  });
+
+  // Mark contact as contacted
+  await new Promise((resolve, reject) => {
+    db.run(
+      'UPDATE contacts SET contacted = 1, last_contacted = CURRENT_TIMESTAMP WHERE id = ?',
+      [contact.id],
+      (err) => err ? reject(err) : resolve()
+    );
+  });
+
+  // Log success
+  await logOutreach(campaignId, contact.id, contact.email, 'sent', personalizedSubject);
 }
 
 // Function to process links for click tracking
@@ -1133,9 +1362,6 @@ app.get('*', (req, res) => {
 // =============================================================================
 
 async function startServer() {
-  console.log('🔧 Initializing professional email service...');
-  const emailReady = await initializeEmailService();
-
   const server = app.listen(PORT, () => {
     console.log(`
 ╔═══════════════════════════════════════════════════════════════════════════════╗
@@ -1143,26 +1369,31 @@ async function startServer() {
 ╠═══════════════════════════════════════════════════════════════════════════════╣
 ║  Web Interface: http://localhost:${PORT}                                        ║
 ║  Database: ./data/cold_email_system.db                                       ║
-║  Email Service: ${emailReady ? '✅ Ready for Professional Outreach' : '❌ Configure Gmail'}              ║
+║  Email Service: Individual User Gmail Accounts                               ║
 ║                                                                               ║
-║  ${emailReady ? '🎯 Ready to send professional cold emails!' : '⚠️  Configure Gmail in .env to start outreach'}          ║
+║  🎯 Users configure their own Gmail in Settings tab                          ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 
 💼 PROFESSIONAL COLD EMAIL FEATURES:
-   ✅ Personal sender name (appears from you, not a system)
+   ✅ Individual Gmail accounts for each user
+   ✅ Personal sender identity (appears from user's Gmail)
    ✅ No unsubscribe links or campaign branding
    ✅ Professional sending rate (30s delays)
    ✅ Contact management with company/position
    ✅ Personalized templates with {{name}}, {{company}}, etc.
    ✅ Response tracking and follow-up management
 
-🎯 BEST PRACTICES:
-   • Keep emails personal and relevant
-   • Research your contacts before reaching out
-   • Use professional subject lines
-   • Include your real contact information
-   • Follow up appropriately (not too frequently)
-   • Be genuine about your interest in the role/company
+🎯 SETUP PROCESS:
+   • Users register for account
+   • Configure their Gmail in Settings tab
+   • Add contacts and create templates
+   • Send professional cold emails from their Gmail
+
+🔐 SECURITY FEATURES:
+   • Each user's Gmail credentials encrypted and secure
+   • App passwords required (never regular passwords)
+   • Individual email quotas and rate limiting
+   • Professional email tracking and analytics
     `);
   });
 

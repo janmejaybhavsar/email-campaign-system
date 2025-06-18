@@ -881,16 +881,52 @@
             <div id="settings" class="content-section">
                 <h2 class="section-title">⚙️ Professional Email Settings</h2>
 
+                <!-- Gmail Configuration Section -->
                 <div style="margin-bottom: 40px;">
-                    <h3 style="margin-bottom: 20px;">📧 Email Configuration</h3>
+                    <h3 style="margin-bottom: 20px;">📧 Your Gmail Configuration</h3>
                     <div class="alert alert-info">
-                        <strong>Professional Gmail Setup:</strong><br>
-                        Your emails are sent through your Gmail account with your professional identity:<br>
-                        • <strong>From:</strong> Your Name &lt;your-email@gmail.com&gt;<br>
-                        • <strong>No system branding</strong> - appears as personal email<br>
-                        • <strong>Professional signature</strong> included automatically
+                        <strong>🔐 Secure Gmail Setup:</strong><br>
+                        Configure your own Gmail account to send professional cold emails:<br>
+                        • <strong>Your Gmail:</strong> Emails sent from your personal/professional Gmail<br>
+                        • <strong>App Password Required:</strong> Never use your regular Gmail password<br>
+                        • <strong>Secure & Private:</strong> Your credentials are encrypted and secure
                     </div>
-                    <button class="btn" onclick="testEmailConnection()">🧪 Test Email Connection</button>
+                    
+                    <div id="gmailConfigStatus" class="loading">
+                        <div class="spinner"></div>
+                        <div>Loading Gmail configuration...</div>
+                    </div>
+                    
+                    <!-- Gmail Configuration Form -->
+                    <div id="gmailConfigForm" style="display: none;">
+                        <form id="gmailForm">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Your Gmail Address</label>
+                                    <input type="email" class="form-control" id="gmailAddress" 
+                                           placeholder="yourname@gmail.com" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Gmail App Password</label>
+                                    <input type="password" class="form-control" id="gmailAppPassword" 
+                                           placeholder="16-character app password" required>
+                                </div>
+                            </div>
+                            <div class="alert alert-warning">
+                                <strong>📋 How to get Gmail App Password:</strong><br>
+                                1. Enable 2-Factor Authentication on your Google Account<br>
+                                2. Go to <a href="https://myaccount.google.com/security" target="_blank">Google Account Security</a><br>
+                                3. Click "2-Step Verification" → "App passwords"<br>
+                                4. Select "Mail" and "Other (custom name)" → Enter "Cold Email System"<br>
+                                5. Copy the 16-character password and paste it above
+                            </div>
+                            <div style="display: flex; gap: 10px;">
+                                <button type="submit" class="btn">💾 Save Gmail Configuration</button>
+                                <button type="button" class="btn btn-secondary" onclick="testUserGmail()">🧪 Test Gmail</button>
+                                <button type="button" class="btn btn-danger" onclick="removeGmailConfig()" id="removeGmailBtn" style="display: none;">🗑️ Remove</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
 
                 <div style="margin-bottom: 40px;">
@@ -900,7 +936,7 @@
                         <input type="text" class="form-control" id="userName" readonly>
                     </div>
                     <div class="form-group">
-                        <label>Email Address</label>
+                        <label>Account Email</label>
                         <input type="text" class="form-control" id="userEmail" readonly>
                     </div>
                     <div class="form-group">
