@@ -593,32 +593,46 @@ app.post('/api/campaigns/:id/send', authenticateToken, async (req, res) => {
       });
     }
 
-    // Get campaign with template data
-    const campaignData = await db.collection('campaigns').aggregate([
-      { $match: { _id: new ObjectId(campaignId), userId: req.user.userId } },
-      {
-        $lookup: {
-          from: 'templates',
-          localField: 'templateId',
-          foreignField: '_id',
-          as: 'template'
-        }
-      },
-      {
-        $addFields: {
-          templateName: { $arrayElemAt: ['$template.name', 0] },
-          subject: { $arrayElemAt: ['$template.subject', 0] },
-          htmlBody: { $arrayElemAt: ['$template.htmlBody', 0] },
-          textBody: { $arrayElemAt: ['$template.textBody', 0] }
-        }
-      }
-    ]).toArray();
+    // Get campaign data
+    const campaign = await db.collection('campaigns').findOne({
+      _id: new ObjectId(campaignId),
+      userId: req.user.userId
+    });
 
-    if (campaignData.length === 0) {
+    if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
-    const campaign = campaignData[0];
+    // Get template data separately
+    let templateId = campaign.templateId;
+    if (typeof templateId === 'string') {
+      templateId = new ObjectId(templateId);
+    }
+
+    const template = await db.collection('templates').findOne({
+      _id: templateId,
+      userId: req.user.userId
+    });
+
+    if (!template) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    // Combine campaign and template data
+    const campaignWithTemplate = {
+      ...campaign,
+      templateName: template.name,
+      subject: template.subject,
+      htmlBody: template.htmlBody,
+      textBody: template.textBody
+    };
+
+    console.log('📧 Email template loaded:', {
+      templateName: template.name,
+      subject: template.subject,
+      hasHtmlBody: !!template.htmlBody,
+      hasTextBody: !!template.textBody
+    });
 
     // Get available contacts
     const contacts = await db.collection('contacts')
@@ -647,13 +661,13 @@ app.post('/api/campaigns/:id/send', authenticateToken, async (req, res) => {
     res.json({
       message: `Campaign started using ${user.gmailAddress}! Emails are being sent in the background.`,
       totalContacts: contacts.length,
-      campaignName: campaign.name,
+      campaignName: campaignWithTemplate.name,
       gmailAccount: user.gmailAddress
     });
 
     // Start sending emails asynchronously
     setImmediate(() => {
-      sendEmailsWithUserGmail(campaignId, campaign, contacts, user, userTransporter)
+      sendEmailsWithUserGmail(campaignId, campaignWithTemplate, contacts, user, userTransporter)
         .catch(error => {
           console.error('Background email sending failed:', error);
           db.collection('campaigns').updateOne(
@@ -881,6 +895,75 @@ app.delete('/api/user/gmail-config', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Remove Gmail config error:', error);
     res.status(500).json({ error: 'Failed to remove Gmail configuration' });
+  }
+});
+
+// Debug endpoint for testing email content
+app.post('/api/debug/email-preview', authenticateToken, async (req, res) => {
+  try {
+    const { templateId, contactEmail } = req.body;
+
+    if (!templateId || !contactEmail) {
+      return res.status(400).json({ error: 'Template ID and contact email required' });
+    }
+
+    // Get template
+    const template = await db.collection('templates').findOne({
+      _id: new ObjectId(templateId),
+      userId: req.user.userId
+    });
+
+    if (!template) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    // Get contact
+    const contact = await db.collection('contacts').findOne({
+      userId: req.user.userId,
+      email: contactEmail
+    });
+
+    if (!contact) {
+      return res.status(404).json({ error: 'Contact not found' });
+    }
+
+    // Get user
+    const user = await db.collection('users').findOne({
+      _id: new ObjectId(req.user.userId)
+    });
+
+    // Personalize content
+    const personalizedSubject = personalizeContent(template.subject, contact, { userName: user.name });
+    const personalizedHtml = personalizeContent(template.htmlBody || '', contact, { userName: user.name });
+    const personalizedText = personalizeContent(template.textBody || '', contact, { userName: user.name });
+
+    res.json({
+      template: {
+        id: template._id.toString(),
+        name: template.name,
+        originalSubject: template.subject,
+        originalHtml: template.htmlBody,
+        originalText: template.textBody
+      },
+      contact: {
+        name: contact.name,
+        email: contact.email,
+        company: contact.company,
+        position: contact.position
+      },
+      personalized: {
+        subject: personalizedSubject,
+        html: personalizedHtml,
+        text: personalizedText
+      },
+      user: {
+        name: user.name,
+        signature: user.signature
+      }
+    });
+  } catch (error) {
+    console.error('Email preview error:', error);
+    res.status(500).json({ error: 'Failed to generate email preview' });
   }
 });
 
@@ -1218,7 +1301,10 @@ async function sendSingleEmailWithUserGmail(campaignId, campaign, contact, user,
 }
 
 function personalizeContent(content, contact, campaign) {
-  if (!content) return '';
+  if (!content || typeof content !== 'string') {
+    console.warn('⚠️ personalizeContent received empty or invalid content:', { content, type: typeof content });
+    return '';
+  }
 
   const customFields = contact.customFields || {};
 
@@ -1234,6 +1320,14 @@ function personalizeContent(content, contact, campaign) {
   // Handle custom fields
   personalized = personalized.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
     return customFields[key] || match;
+  });
+
+  console.log('🔄 Content personalization:', {
+    originalLength: content.length,
+    personalizedLength: personalized.length,
+    contactName: contact.name,
+    contactCompany: contact.company,
+    userName: campaign.userName
   });
 
   return personalized;
