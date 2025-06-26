@@ -14,4 +14,6 @@ services:
         generateValue: true
       - key: BASE_URL
         value: https://email-campaign-system.onrender.com
+      - key: MONGODB_URI
+        sync: false
     autoDeploy: true
