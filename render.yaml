@@ -16,4 +16,7 @@ services:
         value: https://email-campaign-system.onrender.com
       - key: MONGODB_URI
         sync: false
+      - key: LOG_LEVEL
+        value: info
     autoDeploy: true
+    healthCheckPath: /health
