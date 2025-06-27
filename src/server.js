@@ -53,7 +53,7 @@ app.use((req, res, next) => {
 // Conservative rate limiting for professional use
 const limiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 50, // 50 emails per hour max (professional sending rate)
+  max: 100, // 100 requests per hour
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -120,6 +120,51 @@ async function createIndexes() {
   } catch (error) {
     console.error('⚠️ Index creation warning:', error.message);
   }
+}
+
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+// Convert MongoDB document to client-friendly format
+function formatDocumentForClient(doc, type = 'default') {
+  if (!doc) return null;
+  
+  const formatted = {
+    ...doc,
+    id: doc._id.toString()
+  };
+  
+  // Remove MongoDB _id field
+  delete formatted._id;
+  
+  // Type-specific formatting
+  switch (type) {
+    case 'template':
+      formatted.html_body = formatted.htmlBody;
+      formatted.text_body = formatted.textBody;
+      formatted.template_type = formatted.templateType;
+      formatted.created_at = formatted.createdAt;
+      formatted.updated_at = formatted.updatedAt;
+      break;
+      
+    case 'contact':
+      formatted.created_at = formatted.createdAt;
+      formatted.last_contacted = formatted.lastContacted;
+      formatted.linkedin_url = formatted.linkedinUrl;
+      formatted.custom_fields = formatted.customFields;
+      break;
+      
+    case 'campaign':
+      formatted.template_id = formatted.templateId;
+      formatted.created_at = formatted.createdAt;
+      formatted.sent_count = formatted.sentCount;
+      formatted.total_contacts = formatted.totalContacts;
+      formatted.replied_count = formatted.repliedCount;
+      break;
+  }
+  
+  return formatted;
 }
 
 // =============================================================================
@@ -306,9 +351,12 @@ app.get('/api/contacts', authenticateToken, asyncHandler(async (req, res) => {
     .sort({ createdAt: -1 })
     .toArray();
 
+  // Format contacts for client
+  const formattedContacts = contacts.map(contact => formatDocumentForClient(contact, 'contact'));
+
   res.json({
-    contacts,
-    pagination: { total: contacts.length }
+    contacts: formattedContacts,
+    pagination: { total: formattedContacts.length }
   });
 }));
 
@@ -404,16 +452,10 @@ app.get('/api/templates', authenticateToken, asyncHandler(async (req, res) => {
     .sort({ createdAt: -1 })
     .toArray();
 
-  // Convert _id to id for frontend compatibility
-  const templatesWithId = templates.map(template => ({
-    ...template,
-    id: template._id.toString(),
-    html_body: template.htmlBody,
-    text_body: template.textBody,
-    template_type: template.templateType
-  }));
+  // Format templates for client compatibility
+  const formattedTemplates = templates.map(template => formatDocumentForClient(template, 'template'));
 
-  res.json(templatesWithId);
+  res.json(formattedTemplates);
 }));
 
 // Get single template for editing
@@ -433,12 +475,8 @@ app.get('/api/templates/:id', authenticateToken, asyncHandler(async (req, res) =
     return res.status(404).json({ error: 'Template not found' });
   }
 
-  res.json({
-    ...template,
-    id: template._id.toString(),
-    html_body: template.htmlBody,
-    text_body: template.textBody
-  });
+  const formattedTemplate = formatDocumentForClient(template, 'template');
+  res.json(formattedTemplate);
 }));
 
 // Update template
@@ -545,13 +583,13 @@ app.get('/api/campaigns', authenticateToken, asyncHandler(async (req, res) => {
     { $sort: { createdAt: -1 } }
   ]).toArray();
 
-  const campaignsWithId = campaigns.map(campaign => ({
-    ...campaign,
-    id: campaign._id.toString(),
-    template_name: campaign.templateName
-  }));
+  const formattedCampaigns = campaigns.map(campaign => {
+    const formatted = formatDocumentForClient(campaign, 'campaign');
+    formatted.template_name = campaign.templateName;
+    return formatted;
+  });
 
-  res.json(campaignsWithId);
+  res.json(formattedCampaigns);
 }));
 
 // Send professional outreach campaign with better error handling
@@ -690,7 +728,7 @@ app.post('/api/user/gmail-config', authenticateToken, asyncHandler(async (req, r
   
   try {
     // Test the Gmail configuration
-    const testTransporter = nodemailer.createTransport({
+    const testTransporter = nodemailer.createTransporter({
       host: 'smtp.gmail.com',
       port: 587,
       secure: false,
@@ -761,7 +799,7 @@ app.post('/api/user/gmail-test', authenticateToken, asyncHandler(async (req, res
   
   try {
     // Create transporter with user's credentials
-    const userTransporter = nodemailer.createTransport({
+    const userTransporter = nodemailer.createTransporter({
       host: 'smtp.gmail.com',
       port: 587,
       secure: false,
@@ -951,13 +989,18 @@ app.get('/api/campaigns/analytics/summary', authenticateToken, asyncHandler(asyn
     { $sort: { createdAt: -1 } }
   ]).toArray();
 
-  const campaignsWithId = campaigns.map(campaign => ({
-    ...campaign,
-    id: campaign._id.toString(),
-    sent_count: campaign.sentCount || 0
-  }));
+  const formattedCampaigns = campaigns.map(campaign => {
+    const formatted = formatDocumentForClient(campaign, 'campaign');
+    formatted.sent_count = campaign.sentCount || 0;
+    formatted.tracked_emails = campaign.tracked_emails;
+    formatted.opens = campaign.opens;
+    formatted.clicks = campaign.clicks;
+    formatted.openRate = campaign.openRate;
+    formatted.clickRate = campaign.clickRate;
+    return formatted;
+  });
 
-  res.json(campaignsWithId);
+  res.json(formattedCampaigns);
 }));
 
 app.get('/api/campaigns/:id/analytics', authenticateToken, asyncHandler(async (req, res) => {
@@ -1066,7 +1109,7 @@ async function sendEmailsInBackground(campaignId, campaign, template, contacts, 
   let failedCount = 0;
 
   // Create transporter once
-  const userTransporter = nodemailer.createTransport({
+  const userTransporter = nodemailer.createTransporter({
     host: 'smtp.gmail.com',
     port: 587,
     secure: false,
@@ -1255,7 +1298,7 @@ async function logOutreach(campaignId, contactId, email, status, subject, notes 
 
 // Serve frontend
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
 // Global error handler

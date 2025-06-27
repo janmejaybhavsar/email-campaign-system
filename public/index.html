@@ -1324,13 +1324,13 @@
                     <div class="list-item-content">
                         <div class="list-item-title">${escapeHtml(template.name)}</div>
                         <div class="list-item-subtitle"><strong>Subject:</strong> ${escapeHtml(template.subject)}</div>
-                        <div class="list-item-subtitle">Type: ${template.template_type} • Created: ${formatDate(template.created_at)}</div>
+                        <div class="list-item-subtitle">Type: ${template.template_type || template.templateType || 'outreach'} • Created: ${formatDate(template.created_at || template.createdAt)}</div>
                     </div>
                     <div style="display: flex; gap: 10px;">
-                        <button class="btn btn-secondary btn-sm" onclick="editTemplate(${template.id})">
+                        <button class="btn btn-secondary btn-sm" onclick="editTemplate('${template.id}')">
                             ✏️ Edit
                         </button>
-                        <button class="btn btn-danger btn-sm" onclick="deleteTemplate(${template.id}, '${escapeHtml(template.name)}')">
+                        <button class="btn btn-danger btn-sm" onclick="deleteTemplate('${template.id}', '${escapeHtml(template.name)}')">
                             🗑️ Delete
                         </button>
                     </div>
@@ -1351,17 +1351,19 @@
 
         async function editTemplate(templateId) {
             try {
+                console.log('Editing template:', templateId);
                 const template = await apiCall(`/templates/${templateId}`);
 
                 document.getElementById('editTemplateId').value = template.id;
                 document.getElementById('editTemplateName').value = template.name;
                 document.getElementById('editTemplateSubject').value = template.subject;
-                document.getElementById('editTemplateHtml').value = template.html_body;
-                document.getElementById('editTemplateText').value = template.text_body || '';
+                document.getElementById('editTemplateHtml').value = template.html_body || template.htmlBody || '';
+                document.getElementById('editTemplateText').value = template.text_body || template.textBody || '';
 
                 toggleForm('editTemplateForm');
 
             } catch (error) {
+                console.error('Edit template error:', error);
                 showAlert('❌ Error loading template: ' + error.message, 'danger');
             }
         }
@@ -1403,16 +1405,16 @@
                             Status: <span class="status-badge status-${campaign.status}">${campaign.status}</span>
                         </div>
                         <div class="list-item-subtitle">
-                            📧 Sent: ${campaign.sent_count} | 
-                            👁️ Opens: ${campaign.opens} (${campaign.openRate}%) | 
-                            🔗 Clicks: ${campaign.clicks} (${campaign.clickRate}%)
+                            📧 Sent: ${campaign.sent_count || campaign.sentCount || 0} | 
+                            👁️ Opens: ${campaign.opens || 0} (${campaign.openRate || 0}%) | 
+                            🔗 Clicks: ${campaign.clicks || 0} (${campaign.clickRate || 0}%)
                         </div>
                         <div class="list-item-subtitle">
-                            Created: ${formatDate(campaign.created_at)}
+                            Created: ${formatDate(campaign.created_at || campaign.createdAt)}
                         </div>
                     </div>
                     <div style="display: flex; gap: 10px;">
-                        <button class="btn btn-secondary btn-sm" onclick="viewCampaignAnalytics(${campaign.id}, '${escapeHtml(campaign.name)}')">
+                        <button class="btn btn-secondary btn-sm" onclick="viewCampaignAnalytics('${campaign.id}', '${escapeHtml(campaign.name)}')">
                             📊 Analytics
                         </button>
                     </div>
@@ -1491,27 +1493,27 @@
                             <tr style="border-bottom: 1px solid #f1f3f4;">
                                 <td style="padding: 15px;"><strong>${escapeHtml(campaign.name)}</strong></td>
                                 <td style="padding: 15px; text-align: center;"><span class="status-badge status-${campaign.status}">${campaign.status}</span></td>
-                                <td style="padding: 15px; text-align: center;">${campaign.sent_count}</td>
-                                <td style="padding: 15px; text-align: center;">${campaign.opens}</td>
+                                <td style="padding: 15px; text-align: center;">${campaign.sent_count || campaign.sentCount || 0}</td>
+                                <td style="padding: 15px; text-align: center;">${campaign.opens || 0}</td>
                                 <td style="padding: 15px; text-align: center;">
                                     <div style="display: flex; align-items: center; gap: 10px; justify-content: center;">
                                         <div style="background: #e5e7eb; border-radius: 10px; height: 8px; width: 100px; overflow: hidden;">
-                                            <div style="background: #10b981; height: 100%; width: ${campaign.openRate}%;"></div>
+                                            <div style="background: #10b981; height: 100%; width: ${campaign.openRate || 0}%;"></div>
                                         </div>
-                                        <span>${campaign.openRate}%</span>
+                                        <span>${campaign.openRate || 0}%</span>
                                     </div>
                                 </td>
-                                <td style="padding: 15px; text-align: center;">${campaign.clicks}</td>
+                                <td style="padding: 15px; text-align: center;">${campaign.clicks || 0}</td>
                                 <td style="padding: 15px; text-align: center;">
                                     <div style="display: flex; align-items: center; gap: 10px; justify-content: center;">
                                         <div style="background: #e5e7eb; border-radius: 10px; height: 8px; width: 100px; overflow: hidden;">
-                                            <div style="background: #3b82f6; height: 100%; width: ${campaign.clickRate}%;"></div>
+                                            <div style="background: #3b82f6; height: 100%; width: ${campaign.clickRate || 0}%;"></div>
                                         </div>
-                                        <span>${campaign.clickRate}%</span>
+                                        <span>${campaign.clickRate || 0}%</span>
                                     </div>
                                 </td>
                                 <td style="padding: 15px; text-align: center;">
-                                    <button class="btn btn-secondary btn-sm" onclick="viewCampaignAnalytics(${campaign.id}, '${escapeHtml(campaign.name)}')">
+                                    <button class="btn btn-secondary btn-sm" onclick="viewCampaignAnalytics('${campaign.id}', '${escapeHtml(campaign.name)}')">
                                         View Details
                                     </button>
                                 </td>
@@ -2006,6 +2008,7 @@
         }
 
         function formatDate(dateString) {
+            if (!dateString) return 'N/A';
             return new Date(dateString).toLocaleDateString('en-US', {
                 year: 'numeric',
                 month: 'short',
