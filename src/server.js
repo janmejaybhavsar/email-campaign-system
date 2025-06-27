@@ -728,7 +728,7 @@ app.post('/api/user/gmail-config', authenticateToken, asyncHandler(async (req, r
   
   try {
     // Test the Gmail configuration
-    const testTransporter = nodemailer.createTransporter({
+    const testTransporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
       port: 587,
       secure: false,
@@ -799,7 +799,7 @@ app.post('/api/user/gmail-test', authenticateToken, asyncHandler(async (req, res
   
   try {
     // Create transporter with user's credentials
-    const userTransporter = nodemailer.createTransporter({
+    const userTransporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
       port: 587,
       secure: false,
@@ -1109,7 +1109,7 @@ async function sendEmailsInBackground(campaignId, campaign, template, contacts, 
   let failedCount = 0;
 
   // Create transporter once
-  const userTransporter = nodemailer.createTransporter({
+  const userTransporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
     secure: false,
